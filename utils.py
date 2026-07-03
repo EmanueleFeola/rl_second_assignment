@@ -26,9 +26,9 @@ def append_move(vec_moves, move):
         vec_moves.append(move)
 
 
-def get_legal_moves(x11, x12, x21, x22, action, x_final):
+def get_valid_actions(x11, x12, x21, x22, dice_value, x_final):
     """
-    Given current state (x11, x12, x21, x22) and action,
+    Given current state (x11, x12, x21, x22) and dice_value,
     return all legal next states for the active player.
 
     State convention:
@@ -46,7 +46,7 @@ def get_legal_moves(x11, x12, x21, x22, action, x_final):
         Captures can only happen on shared squares 5..12.
         Square 8 is protected/starred, so landing on an opponent there is illegal.
     """
-    # print(f"[get_legal_moves] action {action}")
+    # print(f"[get_valid_actions] dice_value {dice_value}")
 
     vec_moves = []
 
@@ -54,8 +54,8 @@ def get_legal_moves(x11, x12, x21, x22, action, x_final):
     shared_squares = range(5, 13)   # 5, ..., 12
     protected_shared_squares = [8]  # shared rosette/star square
 
-    # If action is 0, no piece moves.
-    if action == 0:
+    # If dice_value is 0, no piece moves.
+    if dice_value == 0:
         return [[x11, x12, x21, x22]]
 
     vec_p1 = [x11, x12]
@@ -68,7 +68,7 @@ def get_legal_moves(x11, x12, x21, x22, action, x_final):
         if x_curr == x_final:
             continue
 
-        x_next = x_curr + action
+        x_next = x_curr + dice_value
 
         # Cannot move beyond final.
         if x_next > x_final:

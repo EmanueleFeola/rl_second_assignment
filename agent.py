@@ -1,5 +1,7 @@
 import numpy as np
 import sys
+from utils import roll_4_dice
+
 
 def sarsa(env, num_episodes, discount_factor=1.0, alpha=0.5, epsilon=0.1):
     nA = env.action_space.n
@@ -41,7 +43,8 @@ def sarsa(env, num_episodes, discount_factor=1.0, alpha=0.5, epsilon=0.1):
             next_state, reward, done, _ = env.step(action)
             s_next = ensure_state(next_state)
 
-            next_action = epsilon_greedy_action(s_next)
+            vec_action = get_legal_moves(env.get_state())
+            next_action = vec_action[0]
 
             episode_rewards[i] += reward
             episode_lengths[i] = t

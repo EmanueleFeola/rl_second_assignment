@@ -1,17 +1,25 @@
-from utils import append_move, roll_4_dice, get_legal_moves
+from utils import append_move, roll_4_dice
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
 
 class RoyalGameOfUr(gym.Env):
-    x_final = 15
     vec_x_star = [4, 8, 14]
+    vec_x_shared = [5, 6, 7, 8, 9, 10, 11, 12]
+    vec_x_shared_safe = [8]
+    x_final = 15
 
     def __init__(self, n_piece):
         self.n_piece = n_piece  # Number of pieces per player
-        self.state_space = spaces.Discrete(self.n_piece)
-        self.action_space = spaces.Discrete(4)
+        self.observation_space = spaces.MultiDiscrete([
+            16,  # x11: 0...15
+            16,  # x12: 0...15
+            16,  # x21: 0...15
+            16,  # x22: 0...15
+            5    # dice_sum: 0...4
+        ])
+        self.action_space = spaces.Discrete(3)  # move piece 1, move piece 2, no legal move (pass)
 
         # define the states of the pieces s=(x11, ..., x22, dice_sum)
         self.x11 = None  # piece 1 of player 1
@@ -20,110 +28,210 @@ class RoyalGameOfUr(gym.Env):
         self.x22 = None  # piece 2 of player 2
         self.dice_sum = None
 
-        self.counter = None
+        self.move_count = None
         self.game_over = None
 
         self.reset()
 
-    def reset(self):
-        # reset all pieces to zero, i.e., not on the board.
-        self.x11 = 0
-        self.x12 = 0
-        self.x21 = 0
-        self.x22 = 0
-        self.game_over = False
-        self.counter = 0
-
-        return [self.x11, self.x12, self.x21, self.x22]
-
-    def step_p1(self, action):
-        vec_moves = get_legal_moves(self.x11, self.x12, self.x21, self.x22, action, RoyalGameOfUr.x_final)
-        next_state = vec_moves[0]  # pick first legal action
-        return next_state
-
-    def step_p2(self, action):
-        vec_moves = get_legal_moves(self.x21, self.x22, self.x11, self.x12, action, RoyalGameOfUr.x_final)
-        next_state = vec_moves[0]  # pick first legal action
-        return next_state
+    def get_state(self):
+        return (self.x11, self.x12, self.x21, self.x22, self.dice_sum)
 
     def get_score(self):
         return sum(x == RoyalGameOfUr.x_final for x in [self.x11, self.x12])
 
-    def step(self, action=None):
+    def reset(self):
+        # state definition. reset all pieces to zero, i.e., not on the board, and toss the dice for the first turn.
+        self.x11 = 0
+        self.x12 = 0
+        self.x21 = 0
+        self.x22 = 0
+        self.dice_sum = roll_4_dice()
+
+        self.game_over = False
+        self.move_count = 0
+
+        return self.get_state()
+
+    def get_valid_actions(self, flag_p1_turn):
+        """
+        Given current state (x11, x12, x21, x22) and dice_value,
+        return all legal actions for the active player.
+
+        State convention:
+            x11, x12 = active player's pieces
+            x21, x22 = opponent's pieces
+
+        Position convention:
+            0  = start
+            15 = final / completed
+            1..4   = active player's private entry path
+            5..12  = shared battle path
+            13..14 = active player's private exit path
+
+        Action convention:
+            0 = move active player's first piece
+            1 = move active player's second piece
+            2 = pass / no legal move
+
+        Rules:
+            - Dice value 0 means no movement.
+            - Finished pieces cannot move.
+            - A piece cannot move beyond x_final.
+            - Scoring requires exact dice value.
+            - A piece cannot land on the active player's other piece, except at final.
+            - Captures happen only on shared squares 5..12.
+            - Square 8 is protected, so landing on an opponent there is illegal.
+            - Opponent pieces outside the shared path do not block the active player,
+            because those are private paths.
+        """
+
+        MOVE_PIECE_1 = 0
+        MOVE_PIECE_2 = 1
+        PASS = 2
+
+        vec_valid_action = []
+        vec_x_p1 = [self.x11, self.x12]
+        vec_x_p2 = [self.x21, self.x22]
+
+        if not flag_p1_turn:
+            vec_x_p1 = [self.x21, self.x22]
+            vec_x_p2 = [self.x11, self.x12]
+
+        if self.dice_sum == 0:
+            return [PASS]
+
+        for piece_idx in range(2):
+            x_curr = vec_x_p1[piece_idx]
+            x_other = vec_x_p1[1 - piece_idx]
+
+            # Finished pieces cannot move.
+            if x_curr == self.x_final:
+                continue
+
+            x_next = x_curr + self.dice_sum
+
+            # Cannot move beyond final.
+            if x_next > self.x_final:
+                continue
+
+            # Cannot land on own other piece, except at final.
+            if x_next != self.x_final and x_next == x_other:
+                continue
+
+            # Reaching final is legal if exact.
+            if x_next == self.x_final:
+                vec_valid_action.append(piece_idx)
+                continue
+
+            # Opponent collision matters only on shared squares.
+            if x_next in self.vec_x_shared and x_next in vec_x_p2:
+
+                # Cannot capture or land on protected shared square.
+                if x_next in self.vec_x_shared_safe:
+                    continue
+
+                # Capture on shared non-protected square is legal.
+                vec_valid_action.append(piece_idx)
+                continue
+
+            # If x_next is outside shared path, opponent pieces do not matter.
+            # If x_next is shared but empty, it is also legal.
+            vec_valid_action.append(piece_idx)
+
+        if len(vec_valid_action) == 0:
+            return [PASS]
+
+        return vec_valid_action
+
+    def apply_action(self, action, flag_p1_turn):
+        PASS = 2
+
+        if action == PASS:
+            return False
+
+        if flag_p1_turn:
+            active = [self.x11, self.x12]
+            opponent = [self.x21, self.x22]
+        else:
+            active = [self.x21, self.x22]
+            opponent = [self.x11, self.x12]
+
+        x_old = active[action]
+        x_new = x_old + self.dice_sum
+        active[action] = x_new
+
+        # Capture only with the moved piece, only in shared non-protected squares.
+        if x_new in self.vec_x_shared and x_new not in self.vec_x_shared_safe:
+            if opponent[0] == x_new:
+                opponent[0] = 0
+            elif opponent[1] == x_new:
+                opponent[1] = 0
+
+        if flag_p1_turn:
+            self.x11, self.x12 = active
+            self.x21, self.x22 = opponent
+        else:
+            self.x21, self.x22 = active
+            self.x11, self.x12 = opponent
+
+        return x_new in self.vec_x_star
+
+    def _step_end(self, reward):
+        self.dice_sum = roll_4_dice()
+        return self.get_state(), reward, self.game_over, {}
+
+    def step(self, action):
         old_score = self.get_score()
+        old_state = [self.x11, self.x12, self.x21, self.x22]
+        self.move_count += 1
 
-        # Player 1 moves
-        do_roll = True
-        first_roll = True
+        ##################
+        # P1 moves with action chosen by agent
+        print(f"[step] P1 moves {action} by {self.dice_sum} steps")
+        landed_on_star = self.apply_action(action, flag_p1_turn=True)
 
-        while do_roll:
-            if first_roll and action is not None:
-                action_p1 = action
-            else:
-                action_p1 = roll_4_dice()
-
-            first_roll = False
-
-            old_state = [self.x11, self.x12, self.x21, self.x22]
-
-            next_state = self.step_p1(action_p1)
-            self.x11, self.x12, self.x21, self.x22 = next_state
-
-            do_roll = (
-                (self.x11 in RoyalGameOfUr.vec_x_star and self.x11 != old_state[0]) or
-                (self.x12 in RoyalGameOfUr.vec_x_star and self.x12 != old_state[1])
-            )
-
-        # reward from Player 1's full turn
+        # reward from action
         new_score = self.get_score()
         reward = new_score - old_score
 
-        # Check whether Player 1 won before Player 2 moves
+        # check game over
         if self.x11 == RoyalGameOfUr.x_final and self.x12 == RoyalGameOfUr.x_final:
             self.game_over = True
-            self.counter += 1
-            return [self.x11, self.x12, self.x21, self.x22], reward, self.game_over, {}
+            return self.get_state(), reward, self.game_over, {}
 
-        # Player 2 moves
-        do_roll = True
+        # check double action. if yes, return to agent, i.e., skip p2 move.
+        if landed_on_star:
+            return self._step_end(reward)
 
-        while do_roll:
-            action_p2 = roll_4_dice()
+        ##################
+        # P2 moves with random action
+        flag_p2_turn = True
 
+        while (flag_p2_turn):
             old_state = [self.x11, self.x12, self.x21, self.x22]
+            self.dice_sum = roll_4_dice()
+            vec_legal_action = self.get_valid_actions(flag_p1_turn=False)
 
-            next_state = self.step_p2(action_p2)
-            self.x21, self.x22, self.x11, self.x12 = next_state
+            # choose action in trivial manner
+            action_p2 = np.random.choice(vec_legal_action)
+            landed_on_star_p2 = self.apply_action(action_p2, flag_p1_turn=False)
+            print(f"[step] P2 moves {action_p2} by {self.dice_sum} steps")
 
-            do_roll = (
-                (self.x21 in RoyalGameOfUr.vec_x_star and self.x21 != old_state[2]) or
-                (self.x22 in RoyalGameOfUr.vec_x_star and self.x22 != old_state[3])
-            )
+            # check double action for p2
+            if not landed_on_star_p2:
+                flag_p2_turn = False
 
-        # Check whether Player 2 won
-        self.game_over = (
-            (self.x11 == RoyalGameOfUr.x_final and self.x12 == RoyalGameOfUr.x_final) or
-            (self.x21 == RoyalGameOfUr.x_final and self.x22 == RoyalGameOfUr.x_final)
-        )
+        # check game over
+        if self.x21 == RoyalGameOfUr.x_final and self.x22 == RoyalGameOfUr.x_final:
+            self.game_over = True
+            return self._step_end(reward)
 
-        self.counter += 1
-
-        return [self.x11, self.x12, self.x21, self.x22], reward, self.game_over, {}
+        return self._step_end(reward)
 
     def render(self, player1_loc, player2_loc):
-        """
-        The input for this render functions are lists or sets player1_loc and player2_loc.
-        These should contain the location of the pieces for the respective player.
-        The location should be denoted by the number of the square on the path of that player.
-        More precisely, we can number the squares for both players on their path from 1 to 14, with 1 the first square on the
-        path, and 14 the last square on the path, which is the final one before leaving the board.
-        If player1_loc then equals [2, 4] for example, then he has two pieces in play. The first is on square 2, i.e., the
-        second square on their path, while the second is on square 4, i.e., the fourth square on their path.
-        """
-
         p1_score = np.sum(np.array(player1_loc) == RoyalGameOfUr.x_final)
         p2_score = np.sum(np.array(player2_loc) == RoyalGameOfUr.x_final)
-        print(f"\n[render] round {self.counter}. P1 score {p1_score}, P2 score {p2_score}")
+        print(f"\n[render] round {self.move_count}. P1 score {p1_score}, P2 score {p2_score}")
 
         # clean input
         player1_loc = [i for i in player1_loc if 1 <= i <= 14]
@@ -132,7 +240,7 @@ class RoyalGameOfUr(gym.Env):
         # safe zone
         for i in range(4):  # 0...3
             loc_curr = i + 1
-            base_str = f"{loc_curr:02d}{"*" if loc_curr in RoyalGameOfUr.vec_x_star else ":"}"
+            base_str = f"{loc_curr:02d}{'*' if loc_curr in RoyalGameOfUr.vec_x_star else ':'}"
             if loc_curr in player1_loc and loc_curr in player2_loc:
                 print(f"{base_str} P1 P2")
             elif loc_curr in player1_loc:
@@ -143,9 +251,10 @@ class RoyalGameOfUr(gym.Env):
                 print(f"{base_str}")
 
         # shared/battle zone
+        print("---")
         for i in range(4, 12):  # 4...11
             loc_curr = i+1
-            base_str = f"{loc_curr:02d}{"*" if loc_curr in RoyalGameOfUr.vec_x_star else ":"}"
+            base_str = f"{loc_curr:02d}{'*' if loc_curr in RoyalGameOfUr.vec_x_star else ':'}"
             if loc_curr in player1_loc and loc_curr in player2_loc:
                 raise Exception("there cannot be 2 pieces here")
             elif loc_curr in player1_loc:
@@ -154,6 +263,7 @@ class RoyalGameOfUr(gym.Env):
                 print(f"{base_str} P2")
             else:
                 print(f"{base_str}")
+        print("---")
 
         # safe zone
         for i in range(12, 14):  # 12...13
@@ -167,5 +277,3 @@ class RoyalGameOfUr(gym.Env):
                 print(f"{base_str} P2")
             else:
                 print(f"{base_str}")
-
-        return
