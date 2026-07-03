@@ -154,7 +154,6 @@ class RoyalGameOfUr(gym.Env):
 
         self.counter = None
         self.game_over = None
-        self.vec_scored = [None, None]
 
         self.reset()
 
