@@ -3,7 +3,7 @@ import sys
 from utils import roll_4_dice
 
 
-def sarsa(env, num_episodes, discount_factor=1.0, alpha=0.5, epsilon=0.1):
+def sarsa(env, num_episodes, discount_factor=1.0, alpha=0.5, epsilon=0.1, flag_verbose=False):
     nA = env.action_space.n
 
     Q = {}
@@ -43,7 +43,8 @@ def sarsa(env, num_episodes, discount_factor=1.0, alpha=0.5, epsilon=0.1):
             next_state, reward, done, _ = env.step(action)
             s_next = ensure_state(next_state)
 
-            vec_action = get_legal_moves(env.get_state())
+            state_curr = env.get_state()
+            vec_action = env.get_valid_actions(state_curr)
             next_action = vec_action[0]
 
             episode_rewards[i] += reward

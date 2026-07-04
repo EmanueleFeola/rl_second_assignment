@@ -1,22 +1,30 @@
 from RoyalGameOfUr import RoyalGameOfUr
 from agent import sarsa
 import numpy as np
-from utils import roll_4_dice
+import os
+from utils import load_Q, save_Q
+
+filepath_q_function = "q_function_1000000.npz"
+
 
 if __name__ == "__main__":
-    n_pieces = 2
-    env = RoyalGameOfUr(n_pieces)
-    # env.render([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [1, 4, 8]) # this must throw error. 2 pieces in battle zone.
-    # env.render([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [1, 2, 3, 4, 13, 14])  # full board
-    # env.render([1, 2, 3, 4, 13, 14], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])  # full board
+    n_pieces = 2  # not used inside env., i.e., only 2 pieces are considered to keep logic simple (as indicated in assignment description!)
+    flag_verbose = False
+    env = RoyalGameOfUr(n_pieces, flag_verbose)
+    Q = None
 
-    # Q, episode_rewards, episode_lengths = sarsa(env, 1000)
+    if os.path.exists(filepath_q_function):
+        Q = load_Q(filepath_q_function)
+        print(f"[main] Loaded precomputed Q from {filepath_q_function}")
+    else:
+        Q, _, _ = sarsa(env, 1000000)
+        save_Q(Q, filepath_q_function)
+        print(f"[main] Computed and saved Q to {filepath_q_function}")
 
     state = env.reset()
-    done = False
     while not env.game_over:
         vec_a = env.get_valid_actions(flag_p1_turn=True)
-        action = vec_a[0]  # trivial to test the game evolution
-        next_state, reward, done, _ = env.step(action)
+        action = np.argmax(Q[state])
+        next_state, reward, _, _ = env.step(action)
         state = next_state
         env.render([state[0], state[1]], [state[2], state[3]])

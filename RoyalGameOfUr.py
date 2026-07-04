@@ -1,4 +1,4 @@
-from utils import append_move, roll_4_dice
+from utils import roll_4_dice
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -10,8 +10,8 @@ class RoyalGameOfUr(gym.Env):
     vec_x_shared_safe = [8]
     x_final = 15
 
-    def __init__(self, n_piece):
-        self.n_piece = n_piece  # Number of pieces per player
+    def __init__(self, n_piece, flag_verbose=False):
+        # self.n_piece = n_piece  # assume 2 pieces only
         self.observation_space = spaces.MultiDiscrete([
             16,  # x11: 0...15
             16,  # x12: 0...15
@@ -30,6 +30,7 @@ class RoyalGameOfUr(gym.Env):
 
         self.move_count = None
         self.game_over = None
+        self.flag_verbose = flag_verbose
 
         self.reset()
 
@@ -37,7 +38,12 @@ class RoyalGameOfUr(gym.Env):
         return (self.x11, self.x12, self.x21, self.x22, self.dice_sum)
 
     def get_score(self):
-        return sum(x == RoyalGameOfUr.x_final for x in [self.x11, self.x12])
+        _sum = 0
+        if self.x11 == RoyalGameOfUr.x_final:
+            _sum = _sum + 1
+        if self.x12 == RoyalGameOfUr.x_final:
+            _sum = _sum + 1
+        return _sum
 
     def reset(self):
         # state definition. reset all pieces to zero, i.e., not on the board, and toss the dice for the first turn.
@@ -45,7 +51,7 @@ class RoyalGameOfUr(gym.Env):
         self.x12 = 0
         self.x21 = 0
         self.x22 = 0
-        self.dice_sum = roll_4_dice()
+        self.dice_sum = roll_4_dice()  # dice roll for first turn
 
         self.game_over = False
         self.move_count = 0
@@ -182,12 +188,13 @@ class RoyalGameOfUr(gym.Env):
 
     def step(self, action):
         old_score = self.get_score()
-        old_state = [self.x11, self.x12, self.x21, self.x22]
+        # old_state = [self.x11, self.x12, self.x21, self.x22]
         self.move_count += 1
 
         ##################
         # P1 moves with action chosen by agent
-        print(f"[step] P1 moves {action} by {self.dice_sum} steps")
+        if self.flag_verbose:
+            print(f"[step] P1 moves {action} by {self.dice_sum} steps")
         landed_on_star = self.apply_action(action, flag_p1_turn=True)
 
         # reward from action
@@ -208,14 +215,15 @@ class RoyalGameOfUr(gym.Env):
         flag_p2_turn = True
 
         while (flag_p2_turn):
-            old_state = [self.x11, self.x12, self.x21, self.x22]
+            # old_state = [self.x11, self.x12, self.x21, self.x22]
             self.dice_sum = roll_4_dice()
             vec_legal_action = self.get_valid_actions(flag_p1_turn=False)
 
             # choose action in trivial manner
             action_p2 = np.random.choice(vec_legal_action)
             landed_on_star_p2 = self.apply_action(action_p2, flag_p1_turn=False)
-            print(f"[step] P2 moves {action_p2} by {self.dice_sum} steps")
+            if self.flag_verbose:
+                print(f"[step] P2 moves {action_p2} by {self.dice_sum} steps")
 
             # check double action for p2
             if not landed_on_star_p2:
@@ -251,7 +259,7 @@ class RoyalGameOfUr(gym.Env):
                 print(f"{base_str}")
 
         # shared/battle zone
-        print("---")
+        print("---battle zone---")
         for i in range(4, 12):  # 4...11
             loc_curr = i+1
             base_str = f"{loc_curr:02d}{'*' if loc_curr in RoyalGameOfUr.vec_x_star else ':'}"
@@ -263,7 +271,7 @@ class RoyalGameOfUr(gym.Env):
                 print(f"{base_str} P2")
             else:
                 print(f"{base_str}")
-        print("---")
+        print("-----------")
 
         # safe zone
         for i in range(12, 14):  # 12...13
